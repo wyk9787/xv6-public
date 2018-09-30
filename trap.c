@@ -14,6 +14,8 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
+
 void
 tvinit(void)
 {
@@ -54,6 +56,18 @@ trap(struct trapframe *tf)
       wakeup(&ticks);
       release(&tickslock);
     }
+    // When we receive the timer signal, we also want to check if the alarm is
+    // activated
+    struct proc *my_proc = myproc();
+    if(my_proc != 0 && (tf->cs & 3) == 3 && my_proc->alarmticks != 0){
+      my_proc->ticks_passed++;
+      if(my_proc->ticks_passed == my_proc->alarmticks){
+        my_proc->ticks_passed = 0;
+        tf->esp -= 4;
+        *(uint *) tf->esp = tf->eip;
+        tf->eip = (uint) my_proc->alarmhandler;
+      }
+    }
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:
@@ -85,6 +99,21 @@ trap(struct trapframe *tf)
       cprintf("unexpected trap %d from cpu %d eip %x (cr2=0x%x)\n",
               tf->trapno, cpuid(), tf->eip, rcr2());
       panic("trap");
+    }
+
+    if(tf->trapno == T_PGFLT) {
+      uint va = rcr2();
+      struct proc *curproc = myproc();
+      
+      char *mem = kalloc();
+      
+      memset(mem, 0, PGSIZE);
+      uint page_boundary = PGROUNDDOWN(va);
+
+      mappages(curproc->pgdir, (char*)page_boundary, PGSIZE, V2P(mem), PTE_W|PTE_U);
+      curproc->sz = PGROUNDUP(va);
+      switchuvm(curproc);
+      return;
     }
     // In user space, assume process misbehaved.
     cprintf("pid %d %s: trap %d err %d on cpu %d "

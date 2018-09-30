@@ -49,6 +49,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int alarmticks;              // Number of ticks before the handler is called 
+  void (*alarmhandler)();      // Alarm handler
+  int ticks_passed;            // Number of ticks passed since the alarm was set
 };
 
 // Process memory is laid out contiguously, low addresses first:
